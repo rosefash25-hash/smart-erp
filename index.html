@@ -135,7 +135,7 @@
           <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">💾 Backup &amp; Restore Data</span>
           <span class="text-xl">🗄️</span>
         </div>
-        <p class="text-[11px] text-slate-500 mb-4">Aplikasi ini menyimpan semua data langsung di penyimpanan browser (localStorage) perangkat ini — tidak ada server/cloud. Selalu unduh cadangan (Export) secara rutin, dan gunakan Import untuk memindahkan data ke perangkat/browser lain.</p>
+        <p class="text-[11px] text-slate-500 mb-4">Data kini tersimpan di cloud (Firestore) dan otomatis tersinkron real-time ke semua perangkat (HP, laptop, dll). Tetap disarankan unduh cadangan (Export) secara berkala sebagai jaga-jaga.</p>
         <div class="flex flex-wrap gap-2">
           <button type="button" onclick="exportDataBackup()" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl cursor-pointer">⬇️ Export Data (JSON)</button>
           <button type="button" onclick="document.getElementById('input-import-file').click()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl cursor-pointer">⬆️ Import Data (JSON)</button>
@@ -691,32 +691,106 @@
   </main>
 
   <!-- =========================================================================
+       KONEKSI FIREBASE (SINKRONISASI REAL-TIME ANTAR PERANGKAT)
+       "FirebaseBridge" dibuat dulu secara sinkron (script biasa) supaya kode
+       lama di bawah tidak error walau Firestore belum selesai konek.
+       Modul Firebase (type="module") baru menyusul mengisi datanya secara async.
+  ========================================================================== -->
+  <script>
+    window.FirebaseBridge = {
+      ready: false,
+      db: { stok_barang: [], barang_masuk: [], barang_keluar: [], keuangan: [], gaji_karyawan: [] },
+      onChange: null,
+      _doSave: null,
+      save: function (newDb) {
+        window.FirebaseBridge.db = newDb;
+        try { localStorage.setItem("smartshop_erp_db_cache", JSON.stringify(newDb)); } catch (e) {}
+        if (typeof window.FirebaseBridge._doSave === "function") {
+          window.FirebaseBridge._doSave(newDb);
+        }
+      }
+    };
+    // Sambil menunggu Firebase konek, muat cache terakhir dulu (biar tidak kosong saat offline)
+    try {
+      var cacheAwal = localStorage.getItem("smartshop_erp_db_cache");
+      if (cacheAwal) {
+        var parsedCache = JSON.parse(cacheAwal);
+        ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"].forEach(function (k) {
+          if (Array.isArray(parsedCache[k])) window.FirebaseBridge.db[k] = parsedCache[k];
+        });
+      }
+    } catch (e) {}
+  </script>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDSE8p5V6-dPyzOrIa_YwHi1u5MNyRAjSo",
+      authDomain: "smart-erp-a0c2e.firebaseapp.com",
+      projectId: "smart-erp-a0c2e",
+      storageBucket: "smart-erp-a0c2e.firebasestorage.app",
+      messagingSenderId: "351073762112",
+      appId: "1:351073762112:web:6baf09f882e6def77718a5"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const dbFirestore = getFirestore(app);
+    const dataDocRef = doc(dbFirestore, "erp_data", "toko_utama");
+    const KOSONG = { stok_barang: [], barang_masuk: [], barang_keluar: [], keuangan: [], gaji_karyawan: [] };
+
+    window.FirebaseBridge._doSave = function (newDb) {
+      setDoc(dataDocRef, newDb).catch(function (err) {
+        console.error("Gagal menyimpan ke Firestore:", err);
+        alert("⚠️ Gagal menyimpan ke server (cek koneksi internet). Perubahan belum tersinkron ke perangkat lain.");
+      });
+    };
+
+    onSnapshot(dataDocRef, function (snap) {
+      var data = snap.exists() ? snap.data() : KOSONG;
+      var db = {};
+      ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"].forEach(function (k) {
+        db[k] = Array.isArray(data[k]) ? data[k] : [];
+      });
+      window.FirebaseBridge.db = db;
+      window.FirebaseBridge.ready = true;
+      try { localStorage.setItem("smartshop_erp_db_cache", JSON.stringify(db)); } catch (e) {}
+
+      if (!snap.exists()) {
+        setDoc(dataDocRef, KOSONG).catch(function (err) { console.error("Gagal inisialisasi dokumen:", err); });
+      }
+      if (typeof window.FirebaseBridge.onChange === "function") {
+        window.FirebaseBridge.onChange();
+      }
+    }, function (err) {
+      console.error("Koneksi Firestore gagal:", err);
+      alert("⚠️ Tidak bisa tersambung ke server database. Periksa koneksi internet, lalu muat ulang halaman.");
+    });
+  </script>
+
+  <!-- =========================================================================
        BACKEND PENGGANTI GOOGLE APPS SCRIPT
-       Semua data disimpan di localStorage browser (tidak butuh server/internet).
-       Shim "google.script.run" di bawah ini meniru API asli Google Apps Script,
-       sehingga SELURUH kode frontend asli (yang memanggil google.script.run.xxx)
-       tetap berjalan tanpa perlu diubah sama sekali.
+       Sekarang loadDB()/saveDB() berbicara ke FirebaseBridge (Firestore),
+       BUKAN localStorage lagi — sehingga data tersinkron real-time antar
+       perangkat. Shim "google.script.run" di bawah tetap sama seperti semula,
+       sehingga SELURUH kode frontend asli tetap berjalan tanpa perlu diubah.
   ========================================================================== -->
   <script>
   (function() {
     "use strict";
-    var DB_KEY = "smartshop_erp_db_v1";
 
     function loadDB() {
-      try {
-        var raw = localStorage.getItem(DB_KEY);
-        if (!raw) throw new Error("empty");
-        var db = JSON.parse(raw);
-        ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"].forEach(function(k){
-          if (!Array.isArray(db[k])) db[k] = [];
-        });
-        return db;
-      } catch (e) {
-        return { stok_barang: [], barang_masuk: [], barang_keluar: [], keuangan: [], gaji_karyawan: [] };
-      }
+      var db = (window.FirebaseBridge && window.FirebaseBridge.db) || {};
+      ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"].forEach(function(k){
+        if (!Array.isArray(db[k])) db[k] = [];
+      });
+      return db;
     }
     function saveDB(db) {
-      localStorage.setItem(DB_KEY, JSON.stringify(db));
+      if (window.FirebaseBridge && typeof window.FirebaseBridge.save === "function") {
+        window.FirebaseBridge.save(db);
+      }
     }
     function getTable(nama) {
       var db = loadDB();
@@ -1052,6 +1126,15 @@
     window.google.script = window.google.script || {};
     Object.defineProperty(window.google.script, "run", { get: function() { return buatRunner(); } });
 
+    // Saat ada perubahan data dari Firestore (misal disimpan dari HP lain),
+    // muat ulang semua tampilan yang relevan secara otomatis.
+    window.FirebaseBridge.onChange = function () {
+      if (typeof window.refreshData === "function") window.refreshData();
+      if (typeof window.muatDataKeuangan === "function") window.muatDataKeuangan();
+      if (typeof window.hitungDanMuatRingkasanSaldo === "function") window.hitungDanMuatRingkasanSaldo();
+      if (typeof window.muatDataAnalisisAset === "function") window.muatDataAnalisisAset();
+    };
+
     // ============ BACKUP / RESTORE (fitur tambahan, karena data kini lokal di browser) ============
     window.exportDataBackup = function() {
       var db = loadDB();
@@ -1094,7 +1177,8 @@
     window.resetSemuaDataBackup = function() {
       if (!confirm("PERINGATAN: Ini akan menghapus SEMUA data (stok, transaksi, keuangan, gaji) secara permanen di perangkat ini. Lanjutkan?")) return;
       if (!confirm("Konfirmasi sekali lagi: benar-benar hapus semua data?")) return;
-      localStorage.removeItem(DB_KEY);
+      saveDB({ stok_barang: [], barang_masuk: [], barang_keluar: [], keuangan: [], gaji_karyawan: [] });
+      try { localStorage.removeItem("smartshop_erp_db_cache"); } catch (e) {}
       alert("Semua data telah direset.");
       if (typeof refreshData === "function") refreshData();
       if (typeof muatDataKeuangan === "function") muatDataKeuangan();
