@@ -1547,9 +1547,38 @@ function cetakSemuaBarcodeLabel() {
     function bukaScanner(inputIdTujuan) {
       targetInputId = inputIdTujuan;
       document.getElementById('container-scanner').classList.remove('hidden');
-      html5QrcodeScanner = new Html5Qrcode("reader");
+      html5QrcodeScanner = new Html5Qrcode("reader", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.CODE_93,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.QR_CODE
+        ],
+        verbose: false
+      });
 
-      var config = { fps: 10, qrbox: { width: 250, height: 150 } };
+      // PENTING: qrbox dibuat DINAMIS mengikuti ukuran video kamera yang sebenarnya di HP.
+      // Kalau qrbox pakai angka tetap (misal 250x150) dan ternyata lebih besar dari lebar
+      // video kamera di HP tertentu, area pemindaian jadi salah hitung dan kamera akan
+      // "jalan terus" tanpa pernah berhasil membaca barcode.
+      function qrboxDinamis(viewfinderWidth, viewfinderHeight) {
+        var minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+        var lebar = Math.floor(minEdge * 0.8);
+        var tinggi = Math.floor(lebar * 0.45); // proporsi kotak lebar untuk barcode 1D
+        return { width: lebar, height: Math.max(tinggi, 80) };
+      }
+
+      var config = {
+        fps: 10,
+        qrbox: qrboxDinamis,
+        aspectRatio: 1.0,
+        disableFlip: false,
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+      };
 
       function onScanSuccess(decodedText) {
         document.getElementById(targetInputId).value = decodedText;
