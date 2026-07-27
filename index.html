@@ -3,6 +3,8 @@
 <head>
   <!-- Pustaka Barcode Scanner via Kamera -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- Pustaka parsing CSV (untuk import data lama dari Google Sheets) -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart ERP Toko Online - Standalone Edition</title>
@@ -140,6 +142,41 @@
           <input type="file" id="input-import-file" accept="application/json" class="hidden" onchange="importDataBackup(event)">
           <button type="button" onclick="resetSemuaDataBackup()" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-3 py-2 rounded-xl cursor-pointer">🗑️ Reset Semua Data</button>
         </div>
+      </div>
+
+      <!-- IMPORT DATA LAMA DARI GOOGLE SHEETS (CSV per tab) -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm no-print mt-6">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">📥 Import Data Lama dari Google Sheets</span>
+          <span class="text-xl">📊</span>
+        </div>
+        <p class="text-[11px] text-slate-500 mb-3">
+          Di Google Sheets Anda, buka tiap tab (stok_barang, barang_masuk, barang_keluar, keuangan, gaji_karyawan) satu per satu, lalu
+          <b>File → Download → Comma Separated Values (.csv)</b> (Google Sheets hanya meng-export tab yang sedang aktif). Setelah itu upload file CSV-nya di sini,
+          pilih jenis datanya, lalu klik Proses. Ulangi untuk tiap tab.
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">Jenis Data / Nama Tab Sheet</label>
+            <select id="import-csv-jenis" class="w-full text-sm border border-slate-200 p-2.5 rounded-xl">
+              <option value="stok_barang">Master Stok (stok_barang)</option>
+              <option value="barang_masuk">Barang Masuk (barang_masuk)</option>
+              <option value="barang_keluar">Barang Keluar (barang_keluar)</option>
+              <option value="keuangan">Keuangan Kas (keuangan)</option>
+              <option value="gaji_karyawan">Gaji Karyawan (gaji_karyawan)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-500 mb-1">File CSV</label>
+            <input type="file" id="import-csv-file" accept=".csv,text/csv" class="w-full text-sm border border-slate-200 p-2 rounded-xl">
+          </div>
+        </div>
+        <div class="flex items-center gap-4 mb-3 text-xs text-slate-600">
+          <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="import-csv-mode" value="tambah" checked> Tambahkan ke data yang sudah ada</label>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="import-csv-mode" value="timpa"> Timpa (hapus dulu data lama di tab ini)</label>
+        </div>
+        <button type="button" onclick="prosesImportCSVSheet()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl cursor-pointer">📥 Proses Import CSV</button>
+        <p class="text-[11px] text-slate-400 mt-2">Catatan: baris pertama (header) di CSV akan otomatis dilewati/diabaikan.</p>
       </div>
     </div>
 
@@ -1061,6 +1098,82 @@
       alert("Semua data telah direset.");
       if (typeof refreshData === "function") refreshData();
       if (typeof muatDataKeuangan === "function") muatDataKeuangan();
+    };
+
+    // ============ IMPORT CSV DARI GOOGLE SHEETS ============
+    // Memetakan urutan kolom CSV (persis seperti urutan kolom di Google Sheets asli)
+    // ke struktur baris tabel internal. Baris header (baris pertama) selalu dilewati.
+    var PEMETAAN_KOLOM_CSV = {
+      stok_barang: function(c) {
+        return [
+          String(c[0] || "").trim(), String(c[1] || "").trim(), String(c[2] || "").trim(),
+          Number(c[3]) || 0, Number(c[4]) || 0, Number(c[5]) || 0, Number(c[6]) || 0
+        ];
+      },
+      barang_masuk: function(c) {
+        return [String(c[0] || "").trim(), String(c[1] || "").trim(), String(c[2] || "").trim(), Number(c[3]) || 0, String(c[4] || "").trim()];
+      },
+      barang_keluar: function(c) {
+        return [String(c[0] || "").trim(), String(c[1] || "").trim(), String(c[2] || "").trim(), Number(c[3]) || 0, String(c[4] || "").trim()];
+      },
+      keuangan: function(c) {
+        var nominal = parseFloat(String(c[4] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+        return [String(c[0] || "").trim(), String(c[1] || "").trim(), String(c[2] || "").trim(), String(c[3] || "").trim(), nominal, String(c[5] || "").trim()];
+      },
+      gaji_karyawan: function(c) {
+        return [
+          String(c[0] || "").trim(), String(c[1] || "").trim(), String(c[2] || "").trim(), String(c[3] || "").trim(),
+          Number(c[4]) || 0, Number(c[5]) || 0, Number(c[6]) || 0, Number(c[7]) || 0, String(c[8] || "Lunas").trim()
+        ];
+      }
+    };
+
+    window.prosesImportCSVSheet = function() {
+      var jenis = document.getElementById("import-csv-jenis").value;
+      var fileInput = document.getElementById("import-csv-file");
+      var mode = document.querySelector('input[name="import-csv-mode"]:checked').value;
+      var file = fileInput.files && fileInput.files[0];
+
+      if (!file) { alert("Silakan pilih file CSV terlebih dahulu."); return; }
+      if (typeof Papa === "undefined") { alert("Pustaka pembaca CSV gagal dimuat. Cek koneksi internet lalu muat ulang halaman."); return; }
+
+      Papa.parse(file, {
+        skipEmptyLines: true,
+        complete: function(hasil) {
+          try {
+            var semuaBaris = hasil.data || [];
+            if (semuaBaris.length > 0) semuaBaris.shift(); // buang baris header
+            semuaBaris = semuaBaris.filter(function(r) {
+              return r.some(function(cell) { return String(cell).trim() !== ""; });
+            });
+
+            if (semuaBaris.length === 0) {
+              alert("Tidak ada baris data yang bisa diimport dari file ini (mungkin hanya berisi header).");
+              return;
+            }
+
+            var pemetaan = PEMETAAN_KOLOM_CSV[jenis];
+            var barisBaru = semuaBaris.map(pemetaan);
+
+            var tabelSaatIni = mode === "timpa" ? [] : getTable(jenis);
+            var tabelGabungan = tabelSaatIni.concat(barisBaru);
+            setTable(jenis, tabelGabungan);
+
+            alert("✅ Berhasil import " + barisBaru.length + " baris ke '" + jenis + "' (" + (mode === "timpa" ? "menimpa data lama" : "ditambahkan ke data lama") + ").");
+
+            fileInput.value = "";
+            if (typeof refreshData === "function") refreshData();
+            if (typeof muatDataKeuangan === "function") muatDataKeuangan();
+            if (typeof muatTabelStok === "function") muatTabelStok();
+            if (typeof muatLogHistoriSemua === "function") muatLogHistoriSemua();
+          } catch (err) {
+            alert("Gagal memproses CSV: " + err.message);
+          }
+        },
+        error: function(err) {
+          alert("Gagal membaca file CSV: " + err.message);
+        }
+      });
     };
   })();
   </script>
