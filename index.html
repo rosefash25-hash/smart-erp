@@ -738,27 +738,48 @@
     const app = initializeApp(firebaseConfig);
     const dbFirestore = getFirestore(app);
     const dataDocRef = doc(dbFirestore, "erp_data", "toko_utama");
+    const NAMA_TABEL = ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"];
     const KOSONG = { stok_barang: [], barang_masuk: [], barang_keluar: [], keuangan: [], gaji_karyawan: [] };
 
+    // Firestore tidak mendukung array di dalam array (nested array),
+    // sedangkan tiap tabel di app ini adalah array-of-array (baris x kolom).
+    // Solusinya: simpan tiap tabel sebagai TEKS JSON di Firestore,
+    // lalu diuraikan kembali jadi array biasa saat dibaca.
+    function serializeDb(db) {
+      var out = {};
+      NAMA_TABEL.forEach(function (k) {
+        out[k] = JSON.stringify(Array.isArray(db[k]) ? db[k] : []);
+      });
+      return out;
+    }
+    function deserializeDb(raw) {
+      var out = {};
+      NAMA_TABEL.forEach(function (k) {
+        try {
+          var parsed = typeof raw[k] === "string" ? JSON.parse(raw[k]) : raw[k];
+          out[k] = Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+          out[k] = [];
+        }
+      });
+      return out;
+    }
+
     window.FirebaseBridge._doSave = function (newDb) {
-      setDoc(dataDocRef, newDb).catch(function (err) {
+      setDoc(dataDocRef, serializeDb(newDb)).catch(function (err) {
         console.error("Gagal menyimpan ke Firestore:", err);
         alert("⚠️ Gagal menyimpan ke server (cek koneksi internet). Perubahan belum tersinkron ke perangkat lain.");
       });
     };
 
     onSnapshot(dataDocRef, function (snap) {
-      var data = snap.exists() ? snap.data() : KOSONG;
-      var db = {};
-      ["stok_barang","barang_masuk","barang_keluar","keuangan","gaji_karyawan"].forEach(function (k) {
-        db[k] = Array.isArray(data[k]) ? data[k] : [];
-      });
+      var db = snap.exists() ? deserializeDb(snap.data()) : KOSONG;
       window.FirebaseBridge.db = db;
       window.FirebaseBridge.ready = true;
       try { localStorage.setItem("smartshop_erp_db_cache", JSON.stringify(db)); } catch (e) {}
 
       if (!snap.exists()) {
-        setDoc(dataDocRef, KOSONG).catch(function (err) { console.error("Gagal inisialisasi dokumen:", err); });
+        setDoc(dataDocRef, serializeDb(KOSONG)).catch(function (err) { console.error("Gagal inisialisasi dokumen:", err); });
       }
       if (typeof window.FirebaseBridge.onChange === "function") {
         window.FirebaseBridge.onChange();
