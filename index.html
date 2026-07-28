@@ -129,20 +129,6 @@
         <p class="text-[11px] text-slate-400 mt-1">*Total nilai stok aktif (Harga Modal/Beli)</p>
       </div>
 
-      <!-- KARTU BACKUP & RESTORE (karena data kini tersimpan di browser, bukan di Google Sheets) -->
-      <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm no-print">
-        <div class="flex items-center justify-between mb-3">
-          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">💾 Backup &amp; Restore Data</span>
-          <span class="text-xl">🗄️</span>
-        </div>
-        <p class="text-[11px] text-slate-500 mb-4">Data kini tersimpan di cloud (Firestore) dan otomatis tersinkron real-time ke semua perangkat (HP, laptop, dll). Tetap disarankan unduh cadangan (Export) secara berkala sebagai jaga-jaga.</p>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" onclick="exportDataBackup()" class="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl cursor-pointer">⬇️ Export Data (JSON)</button>
-          <button type="button" onclick="document.getElementById('input-import-file').click()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-xl cursor-pointer">⬆️ Import Data (JSON)</button>
-          <input type="file" id="input-import-file" accept="application/json" class="hidden" onchange="importDataBackup(event)">
-          <button type="button" onclick="resetSemuaDataBackup()" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold px-3 py-2 rounded-xl cursor-pointer">🗑️ Reset Semua Data</button>
-        </div>
-      </div>
 
       <!-- IMPORT DATA LAMA DARI GOOGLE SHEETS (CSV per tab) -->
       <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm no-print mt-6">
@@ -1019,7 +1005,7 @@
       },
 
       ambilRingkasanSaldo: function() {
-        var saldoAwal = { "Bank BCA": 5000000, "Bank Mandiri": 3000000, "Bank BRI": 2000000, "Laci Kasir": 1000000, "Kas Kecil": 500000 };
+        var saldoAwal = { "Bank BCA": 0, "Bank Mandiri": 0, "Bank BRI": 0, "Laci Kasir": 0, "Kas Kecil": 0 };
         var saldo = {
           cashKasir: saldoAwal["Laci Kasir"], cashKecil: saldoAwal["Kas Kecil"],
           bankBCA: saldoAwal["Bank BCA"], bankMandiri: saldoAwal["Bank Mandiri"], bankBRI: saldoAwal["Bank BRI"],
